@@ -1,5 +1,6 @@
 import { condition, defineUpdate, log, setHandler } from '@temporalio/workflow'
-import { Mutex } from 'async-mutex'
+import { MutexInterface, Mutex } from 'async-mutex'
+import { ConditionMutex, FakeMutex, TriggerMutex } from './workflow-mutex'
 
 // ── Signals & Updates ──
 
@@ -23,12 +24,12 @@ export interface PauseResumeState {
 class PauseResumeStateImpl implements PauseResumeState {
   isPaused: boolean
   private lastChange: Date
-  private mutex: Mutex
+  private mutex: MutexInterface
 
   constructor() {
     this.lastChange = new Date(0)
     this.isPaused = false
-    this.mutex = new Mutex()
+    this.mutex = new TriggerMutex()
     this.setupHandlers()
   }
 
