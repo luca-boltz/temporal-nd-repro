@@ -1,15 +1,11 @@
 import {
-  allHandlersFinished,
-  condition,
-  continueAsNew,
+  executeChild,
   log,
   sleep,
   uuid4,
 } from '@temporalio/workflow'
 import PQueue from 'p-queue'
-import { createPauseStateForParentJob } from './pause-resume'
-import { PQueueFireAndForgetSafe, type PQueueLike, SimplePQueue } from './simple-p-queue'
-import { executeTioChild } from './temporal-utils'
+import { createPauseResumeState } from './pause-resume'
 
 // ── Helpers ──
 
@@ -36,7 +32,6 @@ export async function sleepWorkflow(input: SleepInput): Promise<void> {
 }
 
 export interface PipelineInput {
-  parentJobId: string
   numChildren: number
   queueConcurrency: number
   sleepMultiplier: number
@@ -44,24 +39,21 @@ export interface PipelineInput {
 
 
 export async function pipelineWorkflow(input: PipelineInput): Promise<void> {
-  const pauseResumeState = createPauseStateForParentJob()
+  const pauseResumeState = createPauseResumeState()
   const {
-    parentJobId,
     numChildren,
     queueConcurrency,
     sleepMultiplier,
   } = input
   const queue = new PQueue({ concurrency: queueConcurrency })
-  const workflowSuffix = uuid4()
   for (let i = 0; i < numChildren; i++) {
     queue.add(
       async () => {
-        await executeTioChild(
-          pauseResumeState,
-          sleepWorkflow,
-          `sleep-${i}-parent-${parentJobId}-${workflowSuffix}`,
-          [{ sleepMultiplier }],
-        )
+        await pauseResumeState.checkAndWaitIfPaused(`check-sleep-${i}`)
+        await executeChild(sleepWorkflow, {
+          workflowId:`sleep-${i}`,
+          args: [{ sleepMultiplier }],
+        })
       },
     )
   }

@@ -5,14 +5,12 @@ import { pipelineWorkflow, type PipelineInput } from './workflows/pipeline.workf
 
 async function runInterestingScenario(client:Client) {
 
-  const parentJobId = '1'
-  const workflowId = `nd-repro-pipeline-${parentJobId}`
+  const workflowId = `nd-repro-pipeline`
 
   const input: PipelineInput = {
-    parentJobId,
     numChildren: 200,
     queueConcurrency: 10,
-    sleepMultiplier: 0.5,
+    sleepMultiplier: 0.1,
   }
 
   // Start the pipeline

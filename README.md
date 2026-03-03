@@ -1,10 +1,10 @@
 # Temporal Non-Determinism Reproduction
 
-Standalone reproduction of a batched pipeline scheduling pattern to surface non-determinism errors during workflow replay.
+Standalone reproduction of a pipeline scheduling pattern to surface non-determinism errors during workflow replay.
 
 ## What this does
 
-A **pipeline workflow** schedules ~2000 child workflows (200 batches x 10 children each) through a priority queue with concurrency control. Each batch first runs an **alpha** child (long-running, ~90s), which then enqueues N **beta** children (short-running, ~15s) at higher priority. A separate client process toggles pause/resume every 30s via Temporal updates, exercising a mutex-guarded checkpoint system that gates child workflow starts.
+A **pipeline workflow** schedules N child workflows (default 200) through a `p-queue` concurrency limiter. Each child is a simple **sleep workflow** with a log-normal duration. Before starting each child, the pipeline checks a pause/resume gate controlled by a separate client process that toggles pause/resume every few seconds via Temporal updates, exercising a mutex-guarded checkpoint system.
 
 The worker runs with `maxCachedWorkflows: 0`, which forces a full history replay on every workflow activation instead of using cached state. This is the scenario where non-determinism bugs surface — if the replay produces different commands than the original execution, Temporal raises a `[TMPRL1100] Nondeterminism` error.
 
@@ -12,27 +12,22 @@ The worker runs with `maxCachedWorkflows: 0`, which forces a full history replay
 
 ```
 pipeline (parent)
-├── SimplePQueue (priority-based concurrency limiter)
+├── PQueue (concurrency limiter via p-queue)
 ├── PauseResumeState (mutex-guarded pause/resume via Temporal updates)
 │
-├── alpha-0 (child, sleeps ~90s)
-│   ├── beta-0-0 (child, sleeps ~15s)
-│   ├── beta-0-1
-│   └── ...
-├── alpha-1
-│   ├── beta-1-0
-│   └── ...
+├── sleep-0 (child, random duration)
+├── sleep-1
+├── sleep-2
 └── ...
 ```
 
 ## Configuration
 
-The pipeline input supports two flags for comparing queue implementations:
+The pipeline input is configured in `src/client.ts`:
 
-- **`queueType`**: `'simple'` (default) uses a custom deterministic `SimplePQueue` built on Temporal's `Trigger` primitive. `'p-queue'` uses the npm `p-queue` library instead.
-- **`useFireAndForgetSafe`**: `true` (default) wraps the queue with `PQueueFireAndForgetSafe`, which collects settled results and re-throws the first error on `onIdle()`. `false` uses the raw queue directly.
-
-These can be set in `src/client.ts` when constructing the `PipelineInput`.
+- **`numChildren`**: Number of child workflows to schedule (default 200).
+- **`queueConcurrency`**: Max concurrent child workflows (default 10).
+- **`sleepMultiplier`**: Scales child sleep durations and pause/resume interval (default 0.1).
 
 ## Prerequisites
 

@@ -1,6 +1,5 @@
 import { condition, defineUpdate, log, setHandler } from '@temporalio/workflow'
 import { MutexInterface, Mutex } from 'async-mutex'
-import { ConditionMutex, FakeMutex, TriggerMutex } from './workflow-mutex'
 
 // ── Signals & Updates ──
 
@@ -57,7 +56,7 @@ class PauseResumeStateImpl implements PauseResumeState {
   }
 }
 
-export function createPauseStateForParentJob(): PauseResumeState {
+export function createPauseResumeState(): PauseResumeState {
   const state = new PauseResumeStateImpl()
   return state
 }
