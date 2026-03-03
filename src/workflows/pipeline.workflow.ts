@@ -6,8 +6,6 @@ import {
   setHandler,
   sleep,
 } from '@temporalio/workflow'
-import PQueue from 'p-queue'
-import { Mutex } from 'async-mutex'
 
 // ── Helpers ──
 
@@ -35,7 +33,6 @@ export async function sleepWorkflow(input: SleepInput): Promise<void> {
 
 export interface PipelineInput {
   numChildren: number
-  queueConcurrency: number
   sleepMultiplier: number
 }
 
@@ -45,30 +42,28 @@ export const workflowControlUpdate = defineUpdate<void, [{ action: 'pause' | 're
 export async function pipelineWorkflow(input: PipelineInput): Promise<void> {
   const {
     numChildren,
-    queueConcurrency,
     sleepMultiplier,
   } = input
 
-  let isPaused = false
-  const mutex = new Mutex()
+  let isPaused = true
   setHandler(workflowControlUpdate, async (payload) => {
-    return await mutex.runExclusive(async () => {
+    return await (async () => {
       isPaused = payload.action === 'pause'
       log.info('workflowControlUpdate applied', { isPaused })
-    })
+    })()
   })
 
-  const queue = new PQueue({ concurrency: queueConcurrency })
+  const promises = []
   for (let i = 0; i < numChildren; i++) {
-    queue.add(
+    promises.push((
       async () => {
         await condition(() => !isPaused)
         await executeChild(sleepWorkflow, {
           workflowId: `sleep-${i}`,
           args: [{ sleepMultiplier }],
         })
-      },
-    )
+      }
+    )())
   }
-  await queue.onIdle()
+  await Promise.all(promises)
 }

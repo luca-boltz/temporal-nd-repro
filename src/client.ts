@@ -7,51 +7,26 @@ async function runInterestingScenario(client: Client) {
   const workflowId = `nd-repro-pipeline`
 
   const input: PipelineInput = {
-    numChildren: 200,
-    queueConcurrency: 10,
+    numChildren: 10,
     sleepMultiplier: 0.5,
   }
 
   // Start the pipeline
-  try {
-    await client.workflow.start(pipelineWorkflow, {
-      workflowId,
-      taskQueue: 'default',
-      args: [input],
-    })
-    console.log(`Started pipeline: ${workflowId}`)
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('already started')) {
-      console.log(`Pipeline already running: ${workflowId}`)
-    } else {
-      throw error
-    }
-  }
+  const handle = await client.workflow.start(pipelineWorkflow, {
+    workflowId,
+    taskQueue: 'default',
+    args: [input],
+  })
+  console.log(`Started pipeline: ${workflowId}`)
 
-  // Toggle pause/resume repeatedly
-  const handle = client.workflow.getHandle(workflowId)
-  let nextAction: 'pause' | 'resume' = 'pause'
-  const intervalMs = 10_000 * input.sleepMultiplier
+  // After some time, send a 'resume' update
+  const intervalMs = 5_000 * input.sleepMultiplier
+  await setTimeout(intervalMs)
+  console.log('Sending resume signal')
+  await handle.executeUpdate(workflowControlUpdate, { args: [{ action: 'resume' }] })
 
-  console.log(`Toggling pause/resume every ${intervalMs / 1000}s...`)
-
-  while (true) {
-    await setTimeout(intervalMs)
-
-    try {
-      await handle.executeUpdate(workflowControlUpdate, { args: [{ action: nextAction }] })
-      console.log(`Sent ${nextAction}`)
-    } catch (error) {
-      if (error instanceof WorkflowNotFoundError) {
-        console.log('Workflow completed, exiting')
-        return
-      }
-      console.error(`Update failed (${nextAction})`, error)
-      return
-    }
-
-    nextAction = nextAction === 'pause' ? 'resume' : 'pause'
-  }
+  // wait
+  await handle.result()
 }
 
 async function main() {
