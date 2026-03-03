@@ -1,11 +1,13 @@
 import {
+  condition,
+  defineUpdate,
   executeChild,
   log,
+  setHandler,
   sleep,
-  uuid4,
 } from '@temporalio/workflow'
 import PQueue from 'p-queue'
-import { createPauseResumeState } from './pause-resume'
+import { Mutex } from 'async-mutex'
 
 // ── Helpers ──
 
@@ -26,9 +28,9 @@ export interface SleepInput {
 }
 
 export async function sleepWorkflow(input: SleepInput): Promise<void> {
-    const sleepSeconds = sampleLogNormal(30, 50) * input.sleepMultiplier
-    log.info('Child sleeping', { sleepSeconds: Math.round(sleepSeconds) })
-    await sleep(`${Math.round(sleepSeconds)} seconds`)
+  const sleepSeconds = sampleLogNormal(30, 50) * input.sleepMultiplier
+  log.info('Child sleeping', { sleepSeconds: Math.round(sleepSeconds) })
+  await sleep(`${Math.round(sleepSeconds)} seconds`)
 }
 
 export interface PipelineInput {
@@ -37,21 +39,32 @@ export interface PipelineInput {
   sleepMultiplier: number
 }
 
+export const workflowControlUpdate = defineUpdate<void, [{ action: 'pause' | 'resume' }]>('workflowControl')
+
 
 export async function pipelineWorkflow(input: PipelineInput): Promise<void> {
-  const pauseResumeState = createPauseResumeState()
   const {
     numChildren,
     queueConcurrency,
     sleepMultiplier,
   } = input
+
+  let isPaused = false
+  const mutex = new Mutex()
+  setHandler(workflowControlUpdate, async (payload) => {
+    return await mutex.runExclusive(async () => {
+      isPaused = payload.action === 'pause'
+      log.info('workflowControlUpdate applied', { isPaused })
+    })
+  })
+
   const queue = new PQueue({ concurrency: queueConcurrency })
   for (let i = 0; i < numChildren; i++) {
     queue.add(
       async () => {
-        await pauseResumeState.checkAndWaitIfPaused(`check-sleep-${i}`)
+        await condition(() => !isPaused)
         await executeChild(sleepWorkflow, {
-          workflowId:`sleep-${i}`,
+          workflowId: `sleep-${i}`,
           args: [{ sleepMultiplier }],
         })
       },

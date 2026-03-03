@@ -1,16 +1,15 @@
 import { Connection, Client, WorkflowNotFoundError } from '@temporalio/client'
 import { setTimeout } from 'node:timers/promises'
-import { workflowControlUpdate, type WorkflowControlUpdatePayload } from './workflows/pause-resume'
-import { pipelineWorkflow, type PipelineInput } from './workflows/pipeline.workflow'
+import { pipelineWorkflow, type PipelineInput, workflowControlUpdate } from './workflows/pipeline.workflow'
 
-async function runInterestingScenario(client:Client) {
+async function runInterestingScenario(client: Client) {
 
   const workflowId = `nd-repro-pipeline`
 
   const input: PipelineInput = {
     numChildren: 200,
     queueConcurrency: 10,
-    sleepMultiplier: 0.1,
+    sleepMultiplier: 0.5,
   }
 
   // Start the pipeline
@@ -39,10 +38,9 @@ async function runInterestingScenario(client:Client) {
   while (true) {
     await setTimeout(intervalMs)
 
-    const payload: WorkflowControlUpdatePayload = { action: nextAction, timestamp: new Date() }
     try {
-      const written = await handle.executeUpdate(workflowControlUpdate, { args: [payload] })
-      console.log(`Sent ${nextAction} → accepted: ${written}`)
+      await handle.executeUpdate(workflowControlUpdate, { args: [{ action: nextAction }] })
+      console.log(`Sent ${nextAction}`)
     } catch (error) {
       if (error instanceof WorkflowNotFoundError) {
         console.log('Workflow completed, exiting')

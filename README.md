@@ -4,7 +4,7 @@ Standalone reproduction of a pipeline scheduling pattern to surface non-determin
 
 ## What this does
 
-A **pipeline workflow** schedules N child workflows (default 200) through a `p-queue` concurrency limiter. Each child is a simple **sleep workflow** with a log-normal duration. Before starting each child, the pipeline checks a pause/resume gate controlled by a separate client process that toggles pause/resume every few seconds via Temporal updates, exercising a mutex-guarded checkpoint system.
+A **pipeline workflow** schedules N child workflows (default 200) through a `p-queue` concurrency limiter. Each child is a simple **sleep workflow** with a log-normal duration. Before starting each child, the pipeline waits on a `condition(() => !isPaused)` gate. A separate client process toggles pause/resume every few seconds via a Temporal update handler that flips the `isPaused` boolean inside a mutex.
 
 The worker runs with `maxCachedWorkflows: 0`, which forces a full history replay on every workflow activation instead of using cached state. This is the scenario where non-determinism bugs surface — if the replay produces different commands than the original execution, Temporal raises a `[TMPRL1100] Nondeterminism` error.
 
@@ -13,7 +13,7 @@ The worker runs with `maxCachedWorkflows: 0`, which forces a full history replay
 ```
 pipeline (parent)
 ├── PQueue (concurrency limiter via p-queue)
-├── PauseResumeState (mutex-guarded pause/resume via Temporal updates)
+├── isPaused boolean (toggled via Temporal update + mutex)
 │
 ├── sleep-0 (child, random duration)
 ├── sleep-1
@@ -27,7 +27,7 @@ The pipeline input is configured in `src/client.ts`:
 
 - **`numChildren`**: Number of child workflows to schedule (default 200).
 - **`queueConcurrency`**: Max concurrent child workflows (default 10).
-- **`sleepMultiplier`**: Scales child sleep durations and pause/resume interval (default 0.1).
+- **`sleepMultiplier`**: Scales child sleep durations and pause/resume interval (default 0.5).
 
 ## Prerequisites
 
