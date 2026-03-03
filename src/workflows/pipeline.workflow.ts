@@ -23,176 +23,47 @@ function sampleLogNormal(p50Seconds: number, p99Seconds: number): number {
   return Math.max(p50Seconds * 0.5, Math.min(sample, p99Seconds * 1.5))
 }
 
-// ── Child Workflows ──
+// ── Sleep Workflow ──
 
-export interface ChildInput {
-  parentJobId: string
+export interface SleepInput {
   sleepMultiplier: number
 }
 
-export async function alphaWorkflow(input: ChildInput): Promise<void> {
-  const pauseResumeState = createPauseStateForParentJob()
-
-  try {
-    await pauseResumeState.checkAndWaitIfPaused('before-alpha')
-
-    const sleepSeconds = sampleLogNormal(180, 252) * input.sleepMultiplier
-    log.info('Alpha sleeping', { sleepSeconds: Math.round(sleepSeconds) })
-    await sleep(`${Math.round(sleepSeconds)} seconds`)
-    log.info('Alpha completed', {})
-  } finally {
-    await condition(allHandlersFinished)
-  }
-}
-
-export async function betaWorkflow(input: ChildInput): Promise<void> {
-  const pauseResumeState = createPauseStateForParentJob()
-
-  try {
-    await pauseResumeState.checkAndWaitIfPaused('before-beta')
-
+export async function sleepWorkflow(input: SleepInput): Promise<void> {
     const sleepSeconds = sampleLogNormal(30, 50) * input.sleepMultiplier
-    log.info('Beta sleeping', { sleepSeconds: Math.round(sleepSeconds) })
+    log.info('Child sleeping', { sleepSeconds: Math.round(sleepSeconds) })
     await sleep(`${Math.round(sleepSeconds)} seconds`)
-    log.info('Beta completed', {})
-  } finally {
-    await condition(allHandlersFinished)
-  }
 }
-
-// ── Pipeline Workflow ──
-
-const BATCHES_BEFORE_CONTINUE_AS_NEW = 50
-
-const JOB_PRIORITY = {
-  BETA: 10,
-  ALPHA: 1,
-} as const
-
-export type QueueType = 'simple' | 'p-queue'
 
 export interface PipelineInput {
   parentJobId: string
-  totalBatches: number
-  betasPerBatch: number
+  numChildren: number
   queueConcurrency: number
   sleepMultiplier: number
-  queueType?: QueueType
-  useFireAndForgetSafe?: boolean
-  continuationData?: {
-    batchesCompleted: number
-    totalAlphas: number
-    totalBetas: number
-  }
 }
 
-export interface PipelineResult {
-  status: 'completed'
-  totalAlphas: number
-  totalBetas: number
-}
 
-export async function pipelineWorkflow(input: PipelineInput): Promise<PipelineResult> {
+export async function pipelineWorkflow(input: PipelineInput): Promise<void> {
   const pauseResumeState = createPauseStateForParentJob()
-
-  try {
-    const {
-      parentJobId,
-      totalBatches,
-      betasPerBatch,
-      queueConcurrency,
-      sleepMultiplier,
-      continuationData,
-    } = input
-
-    const batchesAlreadyCompleted = continuationData?.batchesCompleted ?? 0
-    let totalAlphas = continuationData?.totalAlphas ?? 0
-    let totalBetas = continuationData?.totalBetas ?? 0
-
-    const remainingBatches = totalBatches - batchesAlreadyCompleted
-    if (remainingBatches <= 0) {
-      return { status: 'completed', totalAlphas, totalBetas }
-    }
-
-    const batchesToRunThisIteration = Math.min(remainingBatches, BATCHES_BEFORE_CONTINUE_AS_NEW)
-
-    log.info('Pipeline iteration', {
-      batchesAlreadyCompleted,
-      batchesToRunThisIteration,
-      remainingBatches,
-      totalBatches,
-    })
-
-    const queueType = input.queueType ?? 'simple'
-    const useFireAndForgetSafe = input.useFireAndForgetSafe ?? true
-
-    const rawQueue: PQueueLike =
-      queueType === 'simple'
-        ? new SimplePQueue({ concurrency: queueConcurrency })
-        : new PQueue({ concurrency: queueConcurrency })
-
-    const queue = useFireAndForgetSafe ? PQueueFireAndForgetSafe(rawQueue) : rawQueue
-
-    log.info('Queue created', { queueType, useFireAndForgetSafe })
-    const workflowSuffix = uuid4()
-
-    for (let i = 0; i < batchesToRunThisIteration; i++) {
-      const batchIndex = batchesAlreadyCompleted + i
-
-      queue.add(
-        async () => {
-          await executeTioChild(
-            pauseResumeState,
-            alphaWorkflow,
-            `sim-alpha-${batchIndex}-parent-${parentJobId}-${workflowSuffix}`,
-            [{ parentJobId, sleepMultiplier }],
-          )
-          totalAlphas++
-
-          for (let betaIndex = 0; betaIndex < betasPerBatch; betaIndex++) {
-            queue.add(
-              async () => {
-                await executeTioChild(
-                  pauseResumeState,
-                  betaWorkflow,
-                  `sim-beta-${batchIndex}-${betaIndex}-parent-${parentJobId}-${workflowSuffix}`,
-                  [{ parentJobId, sleepMultiplier }],
-                )
-                totalBetas++
-              },
-              { priority: JOB_PRIORITY.BETA },
-            )
-          }
-        },
-        { priority: JOB_PRIORITY.ALPHA },
-      )
-    }
-
-    await queue.onIdle()
-
-    const newBatchesCompleted = batchesAlreadyCompleted + batchesToRunThisIteration
-    const shouldContinue = newBatchesCompleted < totalBatches
-
-    if (shouldContinue) {
-      log.info('Pipeline continuing as new', {
-        batchesCompleted: newBatchesCompleted,
-        totalBatches,
-        totalAlphas,
-        totalBetas,
-      })
-      await continueAsNew<typeof pipelineWorkflow>({
-        ...input,
-        continuationData: {
-          batchesCompleted: newBatchesCompleted,
-          totalAlphas,
-          totalBetas,
-        },
-      })
-    }
-
-    log.info('Pipeline completed', { totalAlphas, totalBetas })
-    return { status: 'completed', totalAlphas, totalBetas }
-  } finally {
-    await condition(allHandlersFinished)
+  const {
+    parentJobId,
+    numChildren,
+    queueConcurrency,
+    sleepMultiplier,
+  } = input
+  const queue = new PQueue({ concurrency: queueConcurrency })
+  const workflowSuffix = uuid4()
+  for (let i = 0; i < numChildren; i++) {
+    queue.add(
+      async () => {
+        await executeTioChild(
+          pauseResumeState,
+          sleepWorkflow,
+          `sleep-${i}-parent-${parentJobId}-${workflowSuffix}`,
+          [{ sleepMultiplier }],
+        )
+      },
+    )
   }
+  await queue.onIdle()
 }

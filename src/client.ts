@@ -1,32 +1,23 @@
 import { Connection, Client, WorkflowNotFoundError } from '@temporalio/client'
-import { createHash } from 'node:crypto'
 import { setTimeout } from 'node:timers/promises'
 import { workflowControlUpdate, type WorkflowControlUpdatePayload } from './workflows/pause-resume'
-import type { PipelineInput } from './workflows/pipeline.workflow'
+import { pipelineWorkflow, type PipelineInput } from './workflows/pipeline.workflow'
 
-function deterministicUuid(seed: string): string {
-  const hash = createHash('sha256').update(seed).digest('hex')
-  return [hash.slice(0, 8), hash.slice(8, 12), hash.slice(12, 16), hash.slice(16, 20), hash.slice(20, 32)].join('-')
-}
+async function runInterestingScenario(client:Client) {
 
-async function main() {
-  const connection = await Connection.connect({ address: 'localhost:7233' })
-  const client = new Client({ connection, namespace: 'default' })
-
-  const parentJobId = deterministicUuid('nd-repro:parentJob:0')
+  const parentJobId = '1'
   const workflowId = `nd-repro-pipeline-${parentJobId}`
 
   const input: PipelineInput = {
     parentJobId,
-    totalBatches: 200,
-    betasPerBatch: 10,
-    queueConcurrency: 32,
+    numChildren: 200,
+    queueConcurrency: 10,
     sleepMultiplier: 0.5,
   }
 
   // Start the pipeline
   try {
-    await client.workflow.start('pipelineWorkflow', {
+    await client.workflow.start(pipelineWorkflow, {
       workflowId,
       taskQueue: 'default',
       args: [input],
@@ -40,10 +31,10 @@ async function main() {
     }
   }
 
-  // Toggle pause/resume every 30s
+  // Toggle pause/resume repeatedly
   const handle = client.workflow.getHandle(workflowId)
   let nextAction: 'pause' | 'resume' = 'pause'
-  const intervalMs = 30_000
+  const intervalMs = 10_000 * input.sleepMultiplier
 
   console.log(`Toggling pause/resume every ${intervalMs / 1000}s...`)
 
@@ -65,6 +56,12 @@ async function main() {
 
     nextAction = nextAction === 'pause' ? 'resume' : 'pause'
   }
+}
+
+async function main() {
+  const connection = await Connection.connect({ address: 'localhost:7233' })
+  const client = new Client({ connection, namespace: 'default' })
+  await runInterestingScenario(client)
 }
 
 main().catch((err) => {

@@ -1,1 +1,1 @@
-export { pipelineWorkflow, alphaWorkflow, betaWorkflow } from './pipeline.workflow'
+export { pipelineWorkflow, sleepWorkflow} from './pipeline.workflow'

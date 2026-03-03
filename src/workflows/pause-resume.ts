@@ -29,7 +29,7 @@ class PauseResumeStateImpl implements PauseResumeState {
   constructor() {
     this.lastChange = new Date(0)
     this.isPaused = false
-    this.mutex = new TriggerMutex()
+    this.mutex = new Mutex()
     this.setupHandlers()
   }
 
