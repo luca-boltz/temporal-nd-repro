@@ -31,13 +31,14 @@ export async function sleepWorkflow(input: SleepInput): Promise<void> {
   await sleep(`${Math.round(sleepSeconds)} seconds`)
 }
 
+// ── Main Workflow ──
+
 export interface PipelineInput {
   numChildren: number
   sleepMultiplier: number
 }
 
-export const workflowControlUpdate = defineUpdate<void, [{ action: 'pause' | 'resume' }]>('workflowControl')
-
+export const startWorkUpdate = defineUpdate<void, []>('startWork')
 
 export async function pipelineWorkflow(input: PipelineInput): Promise<void> {
   const {
@@ -45,25 +46,20 @@ export async function pipelineWorkflow(input: PipelineInput): Promise<void> {
     sleepMultiplier,
   } = input
 
-  let isPaused = true
-  setHandler(workflowControlUpdate, async (payload) => {
+  let canStart = false
+  setHandler(startWorkUpdate, async () => {
     return await (async () => {
-      isPaused = payload.action === 'pause'
-      log.info('workflowControlUpdate applied', { isPaused })
+      canStart = true
     })()
   })
 
-  const promises = []
-  for (let i = 0; i < numChildren; i++) {
-    promises.push((
-      async () => {
-        await condition(() => !isPaused)
-        await executeChild(sleepWorkflow, {
-          workflowId: `sleep-${i}`,
-          args: [{ sleepMultiplier }],
-        })
-      }
-    )())
-  }
-  await Promise.all(promises)
+  await Promise.all(
+    Array.from({ length: numChildren }, async (_, i) => {
+      await condition(() => canStart)
+      await executeChild(sleepWorkflow, {
+        workflowId: `sleep-${i}`,
+        args: [{ sleepMultiplier }],
+      })
+    })
+  )
 }

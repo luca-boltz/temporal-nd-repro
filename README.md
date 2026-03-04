@@ -4,7 +4,7 @@ Standalone reproduction of a pipeline scheduling pattern to surface non-determin
 
 ## What this does
 
-A **pipeline workflow** schedules N child workflows (default 200) through a `p-queue` concurrency limiter. Each child is a simple **sleep workflow** with a log-normal duration. Before starting each child, the pipeline waits on a `condition(() => !isPaused)` gate. A separate client process toggles pause/resume every few seconds via a Temporal update handler that flips the `isPaused` boolean inside a mutex.
+A **pipeline workflow** schedules N child workflows (default 10) via `Promise.all`. Each child is a simple **sleep workflow** with a log-normal duration. All children block on `condition(() => canStart)` until the client sends a `startWork` Temporal update that flips the gate open.
 
 The worker runs with `maxCachedWorkflows: 0`, which forces a full history replay on every workflow activation instead of using cached state. This is the scenario where non-determinism bugs surface — if the replay produces different commands than the original execution, Temporal raises a `[TMPRL1100] Nondeterminism` error.
 
@@ -12,8 +12,7 @@ The worker runs with `maxCachedWorkflows: 0`, which forces a full history replay
 
 ```
 pipeline (parent)
-├── PQueue (concurrency limiter via p-queue)
-├── isPaused boolean (toggled via Temporal update + mutex)
+├── canStart gate (flipped by startWork update)
 │
 ├── sleep-0 (child, random duration)
 ├── sleep-1
@@ -25,9 +24,8 @@ pipeline (parent)
 
 The pipeline input is configured in `src/client.ts`:
 
-- **`numChildren`**: Number of child workflows to schedule (default 200).
-- **`queueConcurrency`**: Max concurrent child workflows (default 10).
-- **`sleepMultiplier`**: Scales child sleep durations and pause/resume interval (default 0.5).
+- **`numChildren`**: Number of child workflows to schedule (default 10).
+- **`sleepMultiplier`**: Scales child sleep durations and client delay before sending the start update (default 0.5).
 
 ## Prerequisites
 
@@ -54,5 +52,5 @@ pnpm client                 # terminal 3
 
 ## What to look for
 
-- `[TMPRL1100] Nondeterminism` errors in worker output
+- `[TMPRL1100] Nondeterminism` errors in worker output — this is a different ND error from the one originally investigated, but nonetheless a valid non-determinism bug. Specifically, the child workflow state machine receives a `WorkflowExecutionUpdateCompleted` event it doesn't expect during replay. This happens when the `startWork` update completes at a point in the history that gets interleaved with child workflow commands.
 - Pipeline workflow in the Temporal UI at http://localhost:8233

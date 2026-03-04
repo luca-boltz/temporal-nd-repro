@@ -1,6 +1,6 @@
-import { Connection, Client, WorkflowNotFoundError } from '@temporalio/client'
+import { Connection, Client } from '@temporalio/client'
 import { setTimeout } from 'node:timers/promises'
-import { pipelineWorkflow, type PipelineInput, workflowControlUpdate } from './workflows/pipeline.workflow'
+import { pipelineWorkflow, type PipelineInput, startWorkUpdate } from './workflows/pipeline.workflow'
 
 async function runInterestingScenario(client: Client) {
 
@@ -23,7 +23,7 @@ async function runInterestingScenario(client: Client) {
   const intervalMs = 5_000 * input.sleepMultiplier
   await setTimeout(intervalMs)
   console.log('Sending resume signal')
-  await handle.executeUpdate(workflowControlUpdate, { args: [{ action: 'resume' }] })
+  await handle.executeUpdate(startWorkUpdate)
 
   // wait
   await handle.result()
